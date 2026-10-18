@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="本机双币种个人账本">
+  <title>双币账本 · 本机</title>
+  <link rel="preload" href="/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">¥</div>
+        <div>
+          <p class="brand-title">双币账本</p>
+          <p class="brand-subtitle">LOCAL LEDGER</p>
+        </div>
+      </div>
+      <p class="nav-label">工作台</p>
+      <nav class="nav-list">
+        <button class="nav-item is-active" type="button" data-view="dashboard-view"><span aria-hidden="true">◈</span>总览</button>
+        <button class="nav-item" type="button" data-view="records-view"><span aria-hidden="true">☷</span>收支记录</button>
+        <button class="nav-item" type="button" data-view="wallets-view"><span aria-hidden="true">▣</span>钱包与余额</button>
+        <button class="nav-item" type="button" data-view="exchange-view"><span aria-hidden="true">⇄</span>换汇记录</button>
+        <button class="nav-item" type="button" data-view="categories-view"><span aria-hidden="true">✦</span>类别管理</button>
+        <button class="nav-item" type="button" data-view="backup-view"><span aria-hidden="true">◫</span>备份与导出</button>
+      </nav>
+      <div class="sidebar-note">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div>
+          <strong>仅存本机</strong>
+          <small>数据保存于 private/</small>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">个人财务空间</p>
+          <h1 id="page-title">总览</h1>
+        </div>
+        <div class="topbar-actions">
+          <span id="sync-status" class="sync-status">正在连接…</span>
+          <button id="refresh-button" class="icon-button" type="button" title="刷新数据" aria-label="刷新数据">↻</button>
+          <button id="quick-entry-button" class="button button-primary" type="button">＋ 新建记录</button>
+        </div>
+      </header>
+
+      <section id="dashboard-view" class="view is-visible" aria-labelledby="page-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">MONTHLY SNAPSHOT</p>
+            <h2>本月情况</h2>
+          </div>
+          <label class="month-picker">统计月份
+            <input id="dashboard-month" type="month" autocomplete="off">
+          </label>
+        </div>
+
+        <div id="wallet-cards" class="wallet-grid" aria-live="polite"></div>
+        <div class="stats-grid">
+          <article class="stat-card stat-card-wide">
+            <div class="stat-card-heading"><span>本月支出</span><span class="stat-icon coral" aria-hidden="true">↘</span></div>
+            <div class="currency-totals">
+              <div><span>人民币支出</span><strong id="summary-expense-cny">—</strong></div>
+              <div><span>新币支出</span><strong id="summary-expense-sgd">—</strong></div>
+            </div>
+            <small id="summary-expense-note" class="stat-note">月末 23:59 截止</small>
+          </article>
+          <article class="stat-card stat-card-wide">
+            <div class="stat-card-heading"><span>本月收入</span><span class="stat-icon teal" aria-hidden="true">↗</span></div>
+            <div class="currency-totals">
+              <div><span>人民币收入</span><strong id="summary-income-cny">—</strong></div>
+              <div><span>新币收入</span><strong id="summary-income-sgd">—</strong></div>
+            </div>
+            <small class="stat-note">按记录日期归入月份</small>
+          </article>
+          <article class="stat-card">
+            <div class="stat-card-heading"><span>最近取得的参考汇率</span><span class="stat-icon gold" aria-hidden="true">⌁</span></div>
+            <strong id="today-rate" class="stat-value rate-value">—</strong>
+            <small id="today-rate-note" class="stat-note">正在读取 ECB 报价</small>
+            <small class="stat-note">ECB 每个工作日发布一次，非实时行情</small>
+          </article>
+        </div>
+
+        <div class="dashboard-columns">
+          <article class="panel category-panel">
+            <div class="panel-heading"><div><p class="eyebrow">BY CATEGORY</p><h3>支出类别</h3></div><span id="category-month-label" class="muted-text"></span></div>
+            <div id="category-summary" class="category-summary" aria-live="polite"></div>
+          </article>
+          <article class="panel recent-panel">
+            <div class="panel-heading"><div><p class="eyebrow">LATEST ACTIVITY</p><h3>最近记录</h3></div><button class="text-button" type="button" data-view-target="records-view">查看全部</button></div>
+            <div id="recent-entries" class="recent-list" aria-live="polite"></div>
+          </article>
+        </div>
+
+      </section>
+
+      <section id="records-view" class="view" aria-labelledby="records-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">INCOME & EXPENSE</p><h2 id="records-title">收支记录</h2><p class="section-help">金额和折算结果由本机账本服务计算。</p></div><button class="button button-primary" type="button" data-action="new-entry">＋ 新建记录</button></div>
+        <article class="panel filter-panel">
+          <div class="panel-heading"><div><p class="eyebrow">FILTER</p><h3>查找记录</h3></div><button id="clear-filters" class="text-button" type="button">清除筛选</button></div>
+          <form id="filter-form" class="filter-grid">
+            <label>起始日期<input id="filter-date-from" type="date"></label>
+            <label>结束日期<input id="filter-date-to" type="date"></label>
+            <label>类别<select id="filter-category"><option value="">全部类别</option></select></label>
+            <label>币种<select id="filter-currency"><option value="">全部币种</option><option value="CNY">CNY 人民币</option><option value="SGD">SGD 新加坡元</option></select></label>
+            <label class="filter-search">名称或备注<input id="filter-query" type="search" placeholder="例如：超市、房租"></label>
+            <label>金额（原币）<input id="filter-amount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="精确匹配，例如 6.00"></label>
+            <button class="button button-secondary filter-submit" type="submit">应用筛选</button>
+          </form>
+        </article>
+        <div class="content-grid two-column">
+          <article class="panel form-panel">
+            <div class="panel-heading"><div><p class="eyebrow" id="entry-form-eyebrow">NEW ENTRY</p><h3 id="entry-form-title">添加记录</h3></div><button id="cancel-entry" class="icon-button subtle" type="button" aria-label="取消编辑" hidden>×</button></div>
+            <form id="entry-form" class="stack-form">
+              <input id="entry-id" type="hidden">
+              <div class="form-row two-up">
+                <label>类型<select id="entry-kind" required><option value="expense">支出</option><option value="income">收入</option></select></label>
+                <label>发生日期<input id="entry-date" type="date" required></label>
+              </div>
+              <div class="form-row two-up">
+                <label>币种<select id="entry-currency" required><option value="CNY">CNY 人民币</option><option value="SGD" selected>SGD 新加坡元</option></select></label>
+                <label>金额<input id="entry-amount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" required></label>
+              </div>
+              <label>名称<input id="entry-name" type="text" maxlength="120" placeholder="例如：食堂午餐" required></label>
+              <label>类别<select id="entry-category" required><option value="">请选择类别</option></select></label>
+              <label>备注（可选）<textarea id="entry-note" rows="2" maxlength="500" placeholder="补充说明"></textarea></label>
+              <label class="file-field">添加照片（可选）<input id="entry-photo" type="file" accept="image/jpeg,image/png,image/webp" multiple aria-describedby="entry-photo-help entry-photo-count"><small id="entry-photo-help">可按 Ctrl / Shift 多选，也可重复添加；每笔最多 20 张。JPEG、PNG 或 WebP，每张最大 8 MiB，仅保存在本机。点击缩略图可查看原图。</small></label>
+              <span id="entry-photo-count" class="photo-count" role="status">已添加 0 / 20 张</span>
+              <div id="entry-photo-current" class="photo-current" aria-label="这笔记录的照片" hidden></div>
+              <p id="entry-photo-status" class="photo-status" role="status"></p>
+              <button class="button button-primary full-width" type="submit">保存记录</button>
+            </form>
+            <p id="entry-save-receipt" class="form-hint entry-save-receipt" role="status" hidden></p>
+          </article>
+          <article class="panel entries-panel">
+            <div class="panel-heading"><div><p class="eyebrow">ENTRIES</p><h3>记录列表</h3></div></div>
+            <div id="entries-columns" class="entries-columns" aria-hidden="true"><span>名称</span><span>分类</span><span class="align-right">金额</span><span class="entry-actions-label">操作</span></div>
+            <div id="entries-groups"></div>
+            <p id="entries-empty" class="empty-state" hidden>这个筛选范围暂无记录。</p>
+            <p class="entry-totals-note">每日收支按当前筛选结果统计，人民币与新币分别汇总。</p>
+          </article>
+        </div>
+        <div class="section-heading compact-heading"><div><p class="eyebrow">INTERNAL TRANSFER</p><h2>内部转账</h2><p class="section-help">用于记录本人账户之间的同币种资金移动，不改变钱包余额，也不计入收入或支出。</p></div></div>
+        <div class="content-grid two-column">
+          <article class="panel form-panel">
+            <div class="panel-heading"><div><p class="eyebrow" id="internal-transfer-form-eyebrow">NEW TRANSFER</p><h3 id="internal-transfer-form-title">添加内部转账</h3></div><button id="cancel-internal-transfer" class="icon-button subtle" type="button" aria-label="取消编辑" hidden>×</button></div>
+            <form id="internal-transfer-form" class="stack-form">
+              <input id="internal-transfer-id" type="hidden">
+              <div class="form-row two-up"><label>转账日期<input id="internal-transfer-date" type="date" required></label><label>币种<select id="internal-transfer-currency" required><option value="CNY">CNY 人民币</option><option value="SGD">SGD 新加坡元</option></select></label></div>
+              <label>金额<input id="internal-transfer-amount" type="number" inputmode="decimal" min="0.01" step="0.01" required></label>
+              <div class="form-row two-up"><label>转出账户<input id="internal-transfer-from" type="text" maxlength="120" required></label><label>转入账户<input id="internal-transfer-to" type="text" maxlength="120" required></label></div>
+              <label>备注（可选）<textarea id="internal-transfer-note" rows="2" maxlength="500"></textarea></label>
+              <button class="button button-primary full-width" type="submit">保存内部转账</button>
+            </form>
+          </article>
+          <article class="panel table-panel">
+            <div class="panel-heading"><div><p class="eyebrow">TRANSFERS</p><h3>内部转账列表</h3></div></div>
+            <div class="table-scroll"><table><thead><tr><th>日期</th><th>转出</th><th>转入</th><th class="align-right">金额</th><th>备注</th><th>操作</th></tr></thead><tbody id="internal-transfers-table-body"></tbody></table></div>
+            <p id="internal-transfers-empty" class="empty-state" hidden>还没有内部转账记录。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="wallets-view" class="view" aria-labelledby="wallets-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">WALLETS & SNAPSHOTS</p><h2 id="wallets-title">钱包与余额</h2><p class="section-help">初始化后，每笔账保存成功即增减对应币种的钱包。基准日前的历史账目不重复计入。</p></div></div>
+        <div id="wallet-detail-cards" class="wallet-grid"></div>
+        <div class="content-grid two-column">
+          <article class="panel form-panel">
+            <div class="panel-heading"><div><p class="eyebrow">INITIAL / CORRECTION</p><h3>录入余额快照</h3></div></div>
+            <p class="form-hint">余额快照可以稍后补录。截至当日结束（23:59）；旧账若早于或等于该截止日，属于已包含在实际余额快照中的账目，不会再次扣款。</p>
+            <form id="snapshot-form" class="stack-form">
+              <label>钱包币种<select id="snapshot-currency" required><option value="CNY">CNY 人民币</option><option value="SGD">SGD 新加坡元</option></select></label>
+              <label>实际余额<input id="snapshot-balance" type="number" inputmode="decimal" step="0.01" placeholder="例如：1250.00" required></label>
+              <label>截至日期（当日 23:59）<input id="snapshot-cutoff" type="date" required></label>
+              <label>说明（可选）<textarea id="snapshot-note" rows="3" maxlength="500" placeholder="例如：首次使用时的银行余额"></textarea></label>
+              <button class="button button-primary full-width" type="submit">保存余额快照</button>
+            </form>
+          </article>
+          <article class="panel table-panel">
+            <div class="panel-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h3>余额审计记录</h3></div></div>
+            <div class="table-scroll"><table><thead><tr><th>日期</th><th>币种</th><th class="align-right">余额</th><th>说明</th></tr></thead><tbody id="snapshots-table-body"></tbody></table></div>
+            <p id="snapshots-empty" class="empty-state" hidden>还没有余额快照。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="exchange-view" class="view" aria-labelledby="exchange-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">CURRENCY EXCHANGE</p><h2 id="exchange-title">换汇记录</h2><p class="section-help">换汇只移动两个钱包的原币余额，不计入收入或支出。</p></div><button id="refresh-fx-button" class="button button-secondary" type="button">更新待汇率</button></div>
+        <div class="content-grid two-column">
+          <article class="panel form-panel">
+            <div class="panel-heading"><div><p class="eyebrow" id="exchange-form-eyebrow">NEW EXCHANGE</p><h3 id="exchange-form-title">添加换汇</h3></div><button id="cancel-exchange" class="icon-button subtle" type="button" aria-label="取消编辑" hidden>×</button></div>
+            <form id="exchange-form" class="stack-form">
+              <input id="exchange-id" type="hidden">
+              <label>换汇日期<input id="exchange-date" type="date" required></label>
+              <div class="form-row two-up"><label>转出币种<select id="exchange-from-currency" required><option value="CNY">CNY 人民币</option><option value="SGD">SGD 新加坡元</option></select></label><label>转出金额<input id="exchange-from-amount" type="number" inputmode="decimal" min="0.01" step="0.01" required></label></div>
+              <div class="form-row two-up"><label>到账币种<select id="exchange-to-currency" required><option value="SGD">SGD 新加坡元</option><option value="CNY">CNY 人民币</option></select></label><label>到账金额<input id="exchange-to-amount" type="number" inputmode="decimal" min="0.01" step="0.01" required></label></div>
+              <label>备注（可选）<textarea id="exchange-note" rows="2" maxlength="500"></textarea></label>
+              <button class="button button-primary full-width" type="submit">保存换汇</button>
+            </form>
+          </article>
+          <article class="panel table-panel">
+            <div class="panel-heading"><div><p class="eyebrow">EXCHANGES</p><h3>换汇列表</h3></div></div>
+            <div class="table-scroll"><table><thead><tr><th>日期</th><th>转出</th><th>到账</th><th>备注</th><th>操作</th></tr></thead><tbody id="exchanges-table-body"></tbody></table></div>
+            <p id="exchanges-empty" class="empty-state" hidden>还没有换汇记录。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="categories-view" class="view" aria-labelledby="categories-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">CATEGORIES</p><h2 id="categories-title">类别管理</h2><p class="section-help">停用类别后不再用于新记录；删除会从类别列表移除。历史账目及其原分类保留，不影响金额，仍可筛选和编辑。</p></div></div>
+        <div class="content-grid two-column category-layout">
+          <article class="panel form-panel">
+            <div class="panel-heading"><div><p class="eyebrow" id="category-form-eyebrow">NEW CATEGORY</p><h3 id="category-form-title">添加类别</h3></div><button id="cancel-category" class="icon-button subtle" type="button" aria-label="取消编辑" hidden>×</button></div>
+            <form id="category-form" class="stack-form">
+              <input id="category-id" type="hidden">
+              <label>类别名称<input id="category-name" type="text" maxlength="40" placeholder="例如：宠物" required></label>
+              <label class="checkbox-label"><input id="category-active" type="checkbox" checked>启用此类别</label>
+              <button class="button button-primary full-width" type="submit">保存类别</button>
+            </form>
+          </article>
+          <article class="panel table-panel">
+            <div class="panel-heading"><div><p class="eyebrow">YOUR TAXONOMY</p><h3>全部类别</h3></div></div>
+            <div class="table-scroll"><table><thead><tr><th>名称</th><th>状态</th><th>操作</th></tr></thead><tbody id="categories-table-body"></tbody></table></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="backup-view" class="view" aria-labelledby="backup-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">PORTABILITY & SAFETY</p><h2 id="backup-title">备份与导出</h2><p class="section-help">备份包含数据库和本机照片。恢复前会自动保留当前状态。</p></div></div>
+        <div class="content-grid two-column">
+          <article class="panel action-panel">
+            <div class="panel-heading"><div><p class="eyebrow">CSV</p><h3>导出当前筛选</h3></div><span class="stat-icon teal" aria-hidden="true">↓</span></div>
+            <p>导出文件保存在本机 private/exports，表格内容会处理为安全文本。</p>
+            <button id="export-button" class="button button-secondary" type="button">导出 CSV</button>
+          </article>
+          <article class="panel action-panel">
+            <div class="panel-heading"><div><p class="eyebrow">ARCHIVE</p><h3>创建备份</h3></div><span class="stat-icon gold" aria-hidden="true">◫</span></div>
+            <p>每日首次写入会自动留存备份，也可以随时创建手动备份。</p>
+            <button id="create-backup-button" class="button button-primary" type="button">立即创建备份</button>
+          </article>
+        </div>
+        <article class="panel table-panel backups-panel">
+          <div class="panel-heading"><div><p class="eyebrow">RESTORE POINTS</p><h3>已有备份</h3></div><button id="refresh-backups-button" class="text-button" type="button">刷新</button></div>
+          <div class="table-scroll"><table><thead><tr><th>文件名</th><th>时间</th><th>类型</th><th class="align-right">大小</th><th>操作</th></tr></thead><tbody id="backups-table-body"></tbody></table></div>
+          <p id="backups-empty" class="empty-state" hidden>还没有备份。</p>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <dialog id="confirm-dialog" class="confirm-dialog">
+    <form method="dialog" class="confirm-card">
+      <p class="eyebrow">PLEASE CONFIRM</p>
+      <h2 id="confirm-title">请确认操作</h2>
+      <p id="confirm-message"></p>
+      <div class="confirm-actions"><button id="confirm-cancel" class="button button-secondary" value="cancel" type="submit">取消</button><button id="confirm-ok" class="button button-danger" value="ok" type="submit">确认</button></div>
+    </form>
+  </dialog>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

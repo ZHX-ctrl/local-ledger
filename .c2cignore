@@ -1,0 +1,17 @@
+# Private accounting data must never be exposed through the review connector.
+private/
+data/
+photos/
+backups/
+exports/
+work/
+*.sqlite*
+*.db*
+*.csv
+*.zip
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.heic
+*.pdf
