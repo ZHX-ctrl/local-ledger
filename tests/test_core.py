@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import tempfile
 import errno
 from pathlib import Path
@@ -197,6 +198,24 @@ class CoreLedgerTests(unittest.TestCase):
         second = self.command("entry.save", self.entry(currency="SGD", amount="1.00", name="cached"))["entry"]
         self.assertEqual(second["cny_amount"], "5.27")
         self.assertEqual(len(self.calls), calls_after_refresh, "resolved dates come from fx_cache")
+
+    def test_refresh_fetches_previous_business_day_for_dashboard(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            def resolver(day: str) -> dict[str, str]:
+                if day == "2026-10-21":
+                    return {"status": "pending", "reason": "消费日应有的报价尚未取得"}
+                return {"status": "resolved", "rate": "5.2235", "quote_date": day, "source": "synthetic"}
+
+            ledger = Ledger(Path(root), fx_resolver=resolver)
+            ledger.backups = _FakeBackups()
+            try:
+                with patch("ledger_app.service._today", return_value=dt.date(2026, 10, 21)):
+                    ledger.dispatch("fx.refresh", {}, "refresh-1")
+                    today_rate = ledger.state()["today_rate"]
+                self.assertEqual(today_rate["status"], "resolved")
+                self.assertEqual(today_rate["quote_date"], "2026-10-20")
+            finally:
+                ledger.close()
 
     def test_entry_can_be_recorded_before_wallet_initialization(self) -> None:
         with tempfile.TemporaryDirectory() as root:

@@ -52,4 +52,15 @@ class FXTests(unittest.TestCase):
             self.assertIsNone(req.data)
 
 
+    def test_fetch_retries_transport_errors(self):
+        data={'date':'2026-08-10','base':'SGD','quote':'CNY','rate':5.271}
+        with patch('ledger_app.fx._fetch_once', side_effect=[TimeoutError(), OSError(), data]) as once:
+            self.assertEqual(_fetch('2026-08-10'), data)
+            self.assertEqual(once.call_count, 3)
+        with patch('ledger_app.fx._fetch_once', side_effect=TimeoutError()) as once:
+            with self.assertRaises(TimeoutError):
+                _fetch('2026-08-10')
+            self.assertEqual(once.call_count, 3)
+
+
 if __name__=='__main__': unittest.main()
