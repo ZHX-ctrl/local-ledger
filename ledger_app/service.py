@@ -25,6 +25,7 @@ from typing import Any, Callable
 
 from .money import MoneyError, convert_cents, format_cents, parse_amount, parse_rate, rate_text
 from .backup import backup_failure_reason
+from .fx import expected_quote_date
 
 
 LOCAL_TZ = dt.timezone(dt.timedelta(hours=8))
@@ -451,9 +452,14 @@ class Ledger:
             # The dashboard shows the latest official SGD->CNY quote even
             # when there is no transaction dated today.  Include today in
             # every refresh without sending any ledger details.
+            # ECB publishes today's quote only in the European afternoon, so
+            # also ask for the previous business day; until then that is the
+            # latest official quote the dashboard can show.
             today = _today().isoformat()
-            if today not in dates:
-                dates = [today, *dates[:9]]
+            previous = expected_quote_date(_today() - dt.timedelta(days=1)).isoformat()
+            for extra in (previous, today):
+                if extra not in dates:
+                    dates = [extra, *dates[:9]]
         resolved: dict[str, dict[str, Any]] = {}
         for date_str in dates:
             record = self._call_rate_resolver(date_str)

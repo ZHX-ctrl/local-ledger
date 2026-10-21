@@ -47,7 +47,18 @@ class _NoRedirect(HTTPRedirectHandler):
         raise ValueError('Unexpected exchange-rate redirect')
 
 
-def _fetch(date_str):
+def _fetch(date_str, attempts=3):
+    # Some networks intermittently stall a response after TLS succeeds; a
+    # fresh connection usually answers at once, so retry transport errors.
+    for attempt in range(attempts):
+        try:
+            return _fetch_once(date_str)
+        except OSError:
+            if attempt == attempts - 1:
+                raise
+
+
+def _fetch_once(date_str):
     # Only the ISO consumption date and fixed currency pair leave this machine.
     req = Request(ENDPOINT + '?date=' + date_str,
                   headers={'Accept': 'application/json', 'User-Agent': 'LocalLedger/1.0'})
