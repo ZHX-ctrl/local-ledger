@@ -59,6 +59,7 @@ def main():
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--offline', action='store_true', help='不请求汇率（新币折算保持待更新）')
+    parser.add_argument('--exit-when-closed', action='store_true', help='关闭所有账本页面后自动停止服务')
     args=parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error('端口范围为 0–65535')
@@ -96,6 +97,11 @@ def main():
     os.replace(runtime_tmp, root/'runtime.json')
     print(f'本地账本已启动：http://127.0.0.1:{port}', flush=True)
     print('数据仅保存在本地。关闭此窗口或按 Ctrl+C 停止服务。',flush=True)
+    if args.exit_when_closed:
+        from ledger_app.web import IdleExit
+        server.auto_exit=True
+        threading.Thread(target=IdleExit(server).run,daemon=True).start()
+        print('关闭所有账本页面后，服务会自动停止。',flush=True)
     if not args.no_browser:
         threading.Timer(0.5, lambda:webbrowser.open(f'http://127.0.0.1:{port}')).start()
     if not args.offline:
