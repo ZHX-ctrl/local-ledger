@@ -2,11 +2,13 @@
 from __future__ import annotations
 import argparse
 import atexit
+import datetime as dt
 import json
 import os
 from pathlib import Path
 import sys
 import threading
+import time
 import uuid
 import webbrowser
 
@@ -30,6 +32,25 @@ def take_lock(root):
         handle.close()
         return None
     return handle
+
+
+NIGHTLY_REFRESH_HOUR = 23  # UTC+8, after ECB publishes the day's quote
+
+
+def next_nightly_refresh(now):
+    target = now.replace(hour=NIGHTLY_REFRESH_HOUR, minute=0, second=0, microsecond=0)
+    return target if now < target else target + dt.timedelta(days=1)
+
+
+def run_nightly_refresh(refresh, now, sleep=time.sleep, stop=lambda: False):
+    # Poll the wall clock instead of one long sleep so a refresh missed
+    # while the computer slept runs promptly after it wakes.
+    while not stop():
+        target = next_nightly_refresh(now())
+        while not stop() and now() < target:
+            sleep(min(60, max(1, (target - now()).total_seconds())))
+        if not stop():
+            refresh()
 
 
 def main():
@@ -78,12 +99,15 @@ def main():
     if not args.no_browser:
         threading.Timer(0.5, lambda:webbrowser.open(f'http://127.0.0.1:{port}')).start()
     if not args.offline:
-        def refresh():
+        def refresh(prefix='startup-'):
             try:
-                ledger.dispatch('fx.refresh',{},'startup-'+uuid.uuid4().hex)
+                ledger.dispatch('fx.refresh',{},prefix+uuid.uuid4().hex)
             except Exception:
                 pass  # Startup must work offline; no financial details in logs.
         threading.Thread(target=refresh,daemon=True).start()
+        from ledger_app.fx import LOCAL_TZ
+        threading.Thread(target=run_nightly_refresh,daemon=True,args=(
+            lambda: refresh('nightly-'), lambda: dt.datetime.now(LOCAL_TZ))).start()
     try:
         server.serve_forever(poll_interval=.3)
     except KeyboardInterrupt:
