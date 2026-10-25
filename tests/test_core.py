@@ -407,8 +407,8 @@ class CoreLedgerTests(unittest.TestCase):
             "entry.save", self.entry(currency="SGD", amount="6.00", kind="income", name="synthetic income")
         )["entry"]
         cny = self.command("entry.save", self.entry(amount="6.00", name="synthetic CNY"))["entry"]
-        for amount in ("6.01", "16.00"):
-            self.command("entry.save", self.entry(currency="SGD", amount=amount, name=f"synthetic {amount}"))
+        near = self.command("entry.save", self.entry(currency="SGD", amount="6.01", name="synthetic 6.01"))["entry"]
+        self.command("entry.save", self.entry(currency="SGD", amount="16.00", name="synthetic 16.00"))
         drink = self.command(
             "entry.save", self.entry(currency="SGD", amount="6.00", category_id=self.drink, name="other drink")
         )["entry"]
@@ -418,13 +418,14 @@ class CoreLedgerTests(unittest.TestCase):
         baseline = self.ledger.state({"month": "2026-09"})
         calls_before = list(self.calls)
         expected_sgd = {matching["id"], income["id"], drink["id"]}
-        for amount in ("6", "6.0", "6.00", " 6.00 "):
+        for amount, expected in (("6", expected_sgd | {near["id"]}), ("6.0", expected_sgd | {near["id"]}),
+                                 ("6.00", expected_sgd), (" 6.00 ", expected_sgd)):
             with self.subTest(amount=amount):
                 state = self.ledger.state({"month": "2026-09", "currency": "SGD", "amount": amount})
-                self.assertEqual({entry["id"] for entry in state["entries"]}, expected_sgd)
+                self.assertEqual({entry["id"] for entry in state["entries"]}, expected)
                 self.assertEqual(state["summary"], baseline["summary"])
                 self.assertEqual(state["wallets"], baseline["wallets"])
-        both = self.ledger.state({"month": "2026-09", "amount": "6"})
+        both = self.ledger.state({"month": "2026-09", "amount": "6.00"})
         self.assertEqual({entry["id"] for entry in both["entries"]}, expected_sgd | {cny["id"]})
         combined = self.ledger.state({
             "month": "2026-09", "date_from": "2026-09-02", "date_to": "2026-09-02",
@@ -443,9 +444,29 @@ class CoreLedgerTests(unittest.TestCase):
         for empty in (None, "", " "):
             self.assertEqual(self.ledger.state({"month": "2026-09", "amount": empty}), baseline)
 
+    def test_amount_filter_matches_leading_digits(self) -> None:
+        ids = {}
+        for amount in ("6.00", "6.80", "60.00", "650.00", "16.50", "0.50", "7.00"):
+            ids[amount] = self.command(
+                "entry.save", self.entry(currency="SGD", amount=amount, name=f"synthetic {amount}")
+            )["entry"]["id"]
+        for query, expected in (
+            ("6", {"6.00", "6.80", "60.00", "650.00"}),
+            ("06", {"6.00", "6.80", "60.00", "650.00"}),
+            ("6.8", {"6.80"}),
+            ("65", {"650.00"}),
+            ("0", {"0.50"}),
+            ("0.5", {"0.50"}),
+            ("6.00", {"6.00"}),
+            ("9", set()),
+        ):
+            with self.subTest(query=query):
+                state = self.ledger.state({"month": "2026-09", "amount": query})
+                self.assertEqual({entry["id"] for entry in state["entries"]}, {ids[a] for a in expected})
+
     def test_amount_filter_rejects_invalid_values_for_state_and_export(self) -> None:
         invalid_values = (
-            "0", "-6", "6.001", "6e0", "NaN", "1,000", "6.", "90000000000000000.01",
+            "-6", "6.001", "6e0", "NaN", "1,000", "6.", "6%", "6_",
             "9" * 64, 6, 6.0, True, [], {},
         )
         for amount in invalid_values:
@@ -467,7 +488,7 @@ class CoreLedgerTests(unittest.TestCase):
                 "date": "2026-09-02", "currency": currency, "amount": amount,
                 "from_account": "synthetic source", "to_account": "synthetic target",
             })["internal_transfer"])
-        filters = {"month": "2026-09", "currency": "SGD", "amount": "6"}
+        filters = {"month": "2026-09", "currency": "SGD", "amount": "6.00"}
         state = self.ledger.state(filters)
         self.assertEqual(state["entries"], [entry])
         self.assertEqual(state["internal_transfers"], [transfers[0]])

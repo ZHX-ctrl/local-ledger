@@ -169,11 +169,15 @@ def _parse_money(value: Any, *, signed: bool = False, field: str = "金额") -> 
         raise LedgerError("invalid_amount", f"{field}必须是两位小数的金额") from exc
 
 
-def _parse_filter_amount(value: Any) -> int | None:
-    """Normalize a search amount without changing the strict write API."""
+def _parse_filter_amount(value: Any) -> str | None:
+    """Turn a search amount into a LIKE prefix over the 0.00-formatted amount.
+
+    Matching is by leading digits: "6" finds 6.00, 6.80, 60.00 and 650.00 but
+    not 16.50; typing both decimals ("6.00") narrows to that exact amount.
+    """
     if value is None:
         return None
-    message = "筛选金额必须是大于 0 且最多两位小数的数字"
+    message = "筛选金额必须是最多两位小数的数字"
     if not isinstance(value, str):
         raise LedgerError("invalid_amount", message)
     value = value.strip()
@@ -181,11 +185,12 @@ def _parse_filter_amount(value: Any) -> int | None:
         return None
     if len(value) > 32 or not re.fullmatch(r"[0-9]+(?:\.[0-9]{1,2})?", value):
         raise LedgerError("invalid_amount", message)
-    whole, _, fraction = value.partition(".")
-    try:
-        return parse_amount(f"{whole}.{fraction.ljust(2, '0')}")
-    except MoneyError as exc:
-        raise LedgerError("invalid_amount", message) from exc
+    whole, dot, fraction = value.partition(".")
+    return (whole.lstrip("0") or "0") + dot + fraction + "%"
+
+
+def _amount_text_sql(column: str) -> str:
+    return f"printf('%d.%02d', {column}/100, {column}%100)"
 
 
 class Ledger:
@@ -1201,7 +1206,7 @@ class Ledger:
     def _state_locked(self, filters: dict[str, Any]) -> dict[str, Any]:
         month = _parse_month(filters.get("month", _month_now()))
         date_from, date_to = self._list_date_bounds(filters, month)
-        amount_cents = _parse_filter_amount(filters.get("amount"))
+        amount_prefix = _parse_filter_amount(filters.get("amount"))
         currency = None
         conditions = ["e.deleted=0"]
         params: list[Any] = []
@@ -1219,9 +1224,9 @@ class Ledger:
             currency = _parse_currency(filters.get("currency"))
             conditions.append("e.currency=?")
             params.append(currency)
-        if amount_cents is not None:
-            conditions.append("e.amount_cents=?")
-            params.append(amount_cents)
+        if amount_prefix is not None:
+            conditions.append(f"{_amount_text_sql('e.amount_cents')} LIKE ?")
+            params.append(amount_prefix)
         if "q" in filters and filters.get("q") not in (None, ""):
             q = _safe_text(filters.get("q"), "搜索词", limit=200)
             conditions.append("(e.name LIKE ? OR e.note LIKE ? OR c.name LIKE ?)")
@@ -1242,15 +1247,17 @@ class Ledger:
         if date_to is not None:
             ex_conditions.append("date<=?")
             ex_params.append(date_to)
-        if amount_cents is not None:
+        if amount_prefix is not None:
+            from_text = _amount_text_sql("from_amount_cents")
+            to_text = _amount_text_sql("to_amount_cents")
             if currency is not None:
                 ex_conditions.append(
-                    "((from_currency=? AND from_amount_cents=?) OR (to_currency=? AND to_amount_cents=?))"
+                    f"((from_currency=? AND {from_text} LIKE ?) OR (to_currency=? AND {to_text} LIKE ?))"
                 )
-                ex_params.extend([currency, amount_cents, currency, amount_cents])
+                ex_params.extend([currency, amount_prefix, currency, amount_prefix])
             else:
-                ex_conditions.append("(from_amount_cents=? OR to_amount_cents=?)")
-                ex_params.extend([amount_cents, amount_cents])
+                ex_conditions.append(f"({from_text} LIKE ? OR {to_text} LIKE ?)")
+                ex_params.extend([amount_prefix, amount_prefix])
         exchanges = self.db.execute(
             f"SELECT * FROM exchanges WHERE {' AND '.join(ex_conditions)} ORDER BY date DESC,id DESC", ex_params
         ).fetchall()
@@ -1267,9 +1274,9 @@ class Ledger:
         if "currency" in filters and filters.get("currency") not in (None, ""):
             transfer_conditions.append("currency=?")
             transfer_params.append(currency)
-        if amount_cents is not None:
-            transfer_conditions.append("amount_cents=?")
-            transfer_params.append(amount_cents)
+        if amount_prefix is not None:
+            transfer_conditions.append(f"{_amount_text_sql('amount_cents')} LIKE ?")
+            transfer_params.append(amount_prefix)
         if "q" in filters and filters.get("q") not in (None, ""):
             transfer_q = _safe_text(filters.get("q"), "搜索词", limit=200)
             transfer_conditions.append("(from_account LIKE ? OR to_account LIKE ? OR note LIKE ?)")
