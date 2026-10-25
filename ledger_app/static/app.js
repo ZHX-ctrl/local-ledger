@@ -1392,11 +1392,55 @@
       if (!app.csrf) {
         throw new Error("本机会话没有返回写入凭据。");
       }
+      if (session.auto_exit) {
+        startPresence();
+      }
       await loadState();
     } catch (error) {
       setSync("连接失败", true);
       showError(error);
     }
+  }
+
+  // A shortcut-started server stops once no ledger page is open, so each
+  // page reports itself periodically and says goodbye when it closes.
+  function sendPresence(closing) {
+    return fetch("/api/presence", {
+      method: "POST",
+      keepalive: true,
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": app.csrf },
+      body: JSON.stringify({ tab_id: app.tabId, closing: closing })
+    });
+  }
+
+  function startPresence() {
+    app.tabId = newRequestId();
+    function beat() {
+      sendPresence(false).then(function (response) {
+        if (!response.ok) {
+          throw new Error("presence rejected");
+        }
+      }).catch(function () {
+        setSync("服务已停止", true);
+        showToast("本机记账服务已停止，请重新双击桌面“记账”打开。", "error");
+      });
+    }
+    beat();
+    window.setInterval(beat, 30000);
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") {
+        beat();
+      }
+    });
+    window.addEventListener("pageshow", function (event) {
+      if (event.persisted) {
+        beat();
+      }
+    });
+    window.addEventListener("pagehide", function () {
+      sendPresence(true).catch(function () {});
+    });
   }
 
   document.addEventListener("DOMContentLoaded", bootstrap);

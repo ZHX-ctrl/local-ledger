@@ -107,7 +107,7 @@ def ensure_server(root: Path = PROJECT / 'private', *, port: int = 8765,
         log_path = work / f'desktop-startup-{uuid.uuid4().hex}.log'
         python = Path(sys.executable).with_name('python.exe') if os.name == 'nt' else Path(sys.executable)
         command = [str(python), '-X', 'utf8', str(PROJECT / 'run_ledger.py'),
-                   '--no-browser', '--data-dir', str(root), '--port', str(port)]
+                   '--no-browser', '--exit-when-closed', '--data-dir', str(root), '--port', str(port)]
         if offline:
             command.append('--offline')
         with log_path.open('wb') as output:

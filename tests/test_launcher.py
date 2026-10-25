@@ -1,4 +1,5 @@
 """Process lifecycle, single-owner lock, and restart persistence."""
+import datetime as dt
 import json
 import os
 from pathlib import Path
@@ -58,6 +59,30 @@ class LauncherTests(unittest.TestCase):
                 '--no-browser','--offline','--data-dir',str(target)],capture_output=True,timeout=10)
             self.assertEqual(result.returncode,2)
             self.assertFalse(target.exists())
+
+
+class NightlyRefreshTests(unittest.TestCase):
+    def test_next_refresh_is_23_local(self):
+        from run_ledger import next_nightly_refresh
+        tz=dt.timezone(dt.timedelta(hours=8))
+        self.assertEqual(next_nightly_refresh(dt.datetime(2026,10,22,9,41,tzinfo=tz)),
+                         dt.datetime(2026,10,22,23,0,tzinfo=tz))
+        self.assertEqual(next_nightly_refresh(dt.datetime(2026,10,22,23,0,tzinfo=tz)),
+                         dt.datetime(2026,10,23,23,0,tzinfo=tz))
+
+    def test_refreshes_once_per_night_and_after_wake(self):
+        from run_ledger import run_nightly_refresh
+        tz=dt.timezone(dt.timedelta(hours=8))
+        clock=[dt.datetime(2026,10,22,22,58,tzinfo=tz)]
+        fired=[]
+        def sleep(seconds):
+            clock[0]+=dt.timedelta(seconds=seconds)
+            if clock[0].date()==dt.date(2026,10,23) and clock[0].hour==12:
+                clock[0]=dt.datetime(2026,10,24,8,0,tzinfo=tz)  # slept through 23:00
+        run_nightly_refresh(lambda: fired.append(clock[0]), lambda: clock[0], sleep,
+                            stop=lambda: len(fired)>=2)
+        self.assertEqual(fired[0],dt.datetime(2026,10,22,23,0,tzinfo=tz))
+        self.assertEqual(fired[1],dt.datetime(2026,10,24,8,0,tzinfo=tz))
 
 
 if __name__=='__main__':unittest.main()

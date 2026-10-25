@@ -38,6 +38,8 @@ _PHOTO_ID_RE = re.compile(
 )
 _EXPORT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,159}\.csv$")
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
+_TAB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+_MAX_TABS = 50
 _MUTATION_CONFLICT_CODES = {
     "duplicate",
     "duplicate_confirmation_required",
@@ -293,7 +295,30 @@ class LedgerRequestHandler(BaseHTTPRequestHandler):
             return None
         return current
 
+    def _tracked(self, handler: Any) -> None:
+        # In-flight requests keep an auto-exiting server alive until they finish.
+        state = self.server_state
+        with state.lock:
+            state.inflight += 1
+            state.last_activity = time.monotonic()
+        try:
+            handler()
+        finally:
+            with state.lock:
+                state.inflight -= 1
+                state.last_activity = time.monotonic()
+
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+        # Launcher readiness probes are not ledger use.
+        if urlsplit(self.path).path == "/api/health":
+            self._handle_get()
+            return
+        self._tracked(self._handle_get)
+
+    def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+        self._tracked(self._handle_post)
+
+    def _handle_get(self) -> None:
         if not self._host_and_fetch_ok():
             return
         parsed = urlsplit(self.path)
@@ -307,7 +332,7 @@ class LedgerRequestHandler(BaseHTTPRequestHandler):
             current = self._current_session(True)
             assert current is not None
             sid, session, new_cookie = current
-            result = {"ok": True, "csrf": session["csrf"]}
+            result = {"ok": True, "csrf": session["csrf"], "auto_exit": bool(self.server_state.auto_exit)}
             self._send_json(200, result, f"{SESSION_COOKIE}={self._session_cookie(sid)}; Path=/; HttpOnly; SameSite=Strict" if new_cookie else None)
             return
         if route == "/api/state":
@@ -360,8 +385,12 @@ class LedgerRequestHandler(BaseHTTPRequestHandler):
             return
         self._failure(404, "not_found", "请求地址不存在。")
 
-    def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-        if self.path.split("?", 1)[0] != "/api/command":
+    def _handle_post(self) -> None:
+        route = self.path.split("?", 1)[0]
+        if route == "/api/presence":
+            self._handle_presence()
+            return
+        if route != "/api/command":
             # Authenticate even for a malformed write route so it cannot be
             # used as a cross-site probing endpoint.
             if self._require_command_auth() is None:
@@ -390,6 +419,26 @@ class LedgerRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "result": result})
         except Exception as exc:
             self._send_ledger_exception(exc)
+
+    def _handle_presence(self) -> None:
+        """Record that a ledger page is open (heartbeat) or was just closed."""
+        if self._require_command_auth() is None:
+            return
+        body = self._read_json_body()
+        if body is None:
+            return
+        tab_id = body.get("tab_id")
+        closing = body.get("closing", False)
+        if not isinstance(tab_id, str) or not _TAB_ID_RE.fullmatch(tab_id) or not isinstance(closing, bool):
+            self._failure(400, "invalid_presence", "页面在线信息无效。")
+            return
+        state = self.server_state
+        with state.lock:
+            if closing:
+                state.tabs.pop(tab_id, None)
+            elif tab_id in state.tabs or len(state.tabs) < _MAX_TABS:
+                state.tabs[tab_id] = time.monotonic()
+        self._send_json(200, {"ok": True})
 
     def _read_json_body(self) -> dict[str, Any] | None:
         content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
@@ -541,7 +590,58 @@ def make_server(ledger: Any, port: int = 8765) -> ThreadingHTTPServer:
     server.sessions: dict[str, dict[str, Any]] = {}
     server.session_secret = secrets.token_bytes(32)
     server.lock = threading.RLock()
+    server.auto_exit = False
+    server.tabs: dict[str, float] = {}
+    server.inflight = 0
+    server.last_activity = time.monotonic()
     return server
 
 
-__all__ = ["LedgerRequestHandler", "make_server"]
+class IdleExit:
+    """Decide when a shortcut-started server may stop because no page is open.
+
+    Open pages heartbeat through /api/presence and say goodbye when closed.
+    A page that vanishes without a goodbye expires after ``tab_timeout``.
+    After the last page leaves, ``grace`` covers a reload; if no page ever
+    arrives, ``startup_timeout`` applies.  A long gap between checks means
+    the computer slept, so pages get a fresh chance to heartbeat.
+    """
+
+    def __init__(self, server: Any, *, clock: Any = time.monotonic, tab_timeout: float = 180,
+                 grace: float = 15, startup_timeout: float = 300, sleep_gap: float = 60) -> None:
+        self.server = server
+        self.clock = clock
+        self.tab_timeout = tab_timeout
+        self.grace = grace
+        self.startup_timeout = startup_timeout
+        self.sleep_gap = sleep_gap
+        self.last_check: float | None = None
+        self.seen_tab = False
+
+    def should_exit(self) -> bool:
+        now = self.clock()
+        state = self.server
+        with state.lock:
+            if self.last_check is not None and now - self.last_check > self.sleep_gap:
+                for tab_id in state.tabs:
+                    state.tabs[tab_id] = now
+                state.last_activity = max(state.last_activity, now)
+            self.last_check = now
+            for tab_id, seen in list(state.tabs.items()):
+                if now - seen > self.tab_timeout:
+                    del state.tabs[tab_id]
+            if state.tabs:
+                self.seen_tab = True
+                return False
+            if state.inflight:
+                return False
+            wait = self.grace if self.seen_tab else self.startup_timeout
+            return now - state.last_activity >= wait
+
+    def run(self, sleep: Any = time.sleep, interval: float = 5) -> None:
+        while not self.should_exit():
+            sleep(interval)
+        self.server.shutdown()
+
+
+__all__ = ["IdleExit", "LedgerRequestHandler", "make_server"]

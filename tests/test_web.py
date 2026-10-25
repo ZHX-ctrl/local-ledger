@@ -11,11 +11,13 @@ import http.client
 import json
 import tempfile
 import threading
+import time
+import types
 import unittest
 from pathlib import Path
 from typing import Any
 
-from ledger_app.web import make_server
+from ledger_app.web import IdleExit, make_server
 
 
 class _Backups:
@@ -179,6 +181,80 @@ class WebContractTests(unittest.TestCase):
         self.assertEqual(status, 400)
         status, _headers, _body = self.request("POST", "/api/command", {"action": "entry.save", "payload": {}}, cookie=self.cookie, csrf=self.csrf, origin=f"http://{self.host}")
         self.assertEqual(status, 400)
+
+    def test_presence_requires_auth_and_tracks_tabs(self) -> None:
+        self.open_session()
+        beat = {"tab_id": "tab-0001-abcd", "closing": False}
+        status, _headers, _body = self.request("POST", "/api/presence", beat, cookie=self.cookie, origin=f"http://{self.host}")
+        self.assertEqual(status, 403)
+        self.assertEqual(self.server.tabs, {})
+        status, _headers, _body = self.request("POST", "/api/presence", beat, cookie=self.cookie, csrf=self.csrf, origin=f"http://{self.host}")
+        self.assertEqual(status, 200)
+        self.assertIn("tab-0001-abcd", self.server.tabs)
+        status, _headers, _body = self.request("POST", "/api/presence", {"tab_id": "../x", "closing": False}, cookie=self.cookie, csrf=self.csrf, origin=f"http://{self.host}")
+        self.assertEqual(status, 400)
+        status, _headers, _body = self.request("POST", "/api/presence", dict(beat, closing=True), cookie=self.cookie, csrf=self.csrf, origin=f"http://{self.host}")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.server.tabs, {})
+        self.assertEqual(self.server.inflight, 0)
+
+    def test_server_stops_after_page_says_goodbye(self) -> None:
+        self.open_session()
+        idle = IdleExit(self.server, grace=0.3, startup_timeout=30)
+        watcher = threading.Thread(target=idle.run, kwargs={"interval": 0.05}, daemon=True)
+        beat = {"tab_id": "tab-0002-abcd", "closing": False}
+        self.request("POST", "/api/presence", beat, cookie=self.cookie, csrf=self.csrf, origin=f"http://{self.host}")
+        watcher.start()
+        time.sleep(0.6)
+        self.assertTrue(self.thread.is_alive(), "an open page keeps the server running")
+        self.request("POST", "/api/presence", dict(beat, closing=True), cookie=self.cookie, csrf=self.csrf, origin=f"http://{self.host}")
+        self.thread.join(timeout=3)
+        self.assertFalse(self.thread.is_alive())
+
+
+class IdleExitTests(unittest.TestCase):
+    def make(self) -> tuple[Any, IdleExit, list[float]]:
+        server = types.SimpleNamespace(lock=threading.RLock(), tabs={}, inflight=0, last_activity=0.0)
+        clock = [0.0]
+        return server, IdleExit(server, clock=lambda: clock[0]), clock
+
+    def test_exits_after_last_page_closes_with_reload_grace(self) -> None:
+        server, idle, clock = self.make()
+        server.tabs["tab"] = 0.0
+        clock[0] = 30
+        self.assertFalse(idle.should_exit())
+        del server.tabs["tab"]
+        server.last_activity = 30
+        clock[0] = 40
+        self.assertFalse(idle.should_exit(), "a reload gets a short grace period")
+        clock[0] = 46
+        self.assertTrue(idle.should_exit())
+
+    def test_waits_for_first_page_and_inflight_requests(self) -> None:
+        server, idle, clock = self.make()
+        clock[0] = 299
+        self.assertFalse(idle.should_exit())
+        server.inflight = 1
+        clock[0] = 301
+        self.assertFalse(idle.should_exit())
+        server.inflight = 0
+        self.assertTrue(idle.should_exit())
+
+    def test_silent_page_expires_but_sleep_gap_resets(self) -> None:
+        server, idle, clock = self.make()
+        server.tabs["tab"] = 0.0
+        for now in range(5, 180, 5):
+            clock[0] = now
+            self.assertFalse(idle.should_exit())
+        clock[0] = 4000  # computer slept for an hour
+        self.assertFalse(idle.should_exit())
+        self.assertEqual(server.tabs["tab"], 4000)
+        for now in range(4005, 4190, 5):
+            clock[0] = now
+            idle.should_exit()
+        self.assertEqual(server.tabs, {})
+        clock[0] = 4200
+        self.assertTrue(idle.should_exit())
 
 
 if __name__ == "__main__":

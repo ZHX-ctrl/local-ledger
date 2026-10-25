@@ -2,11 +2,13 @@
 from __future__ import annotations
 import argparse
 import atexit
+import datetime as dt
 import json
 import os
 from pathlib import Path
 import sys
 import threading
+import time
 import uuid
 import webbrowser
 
@@ -32,12 +34,32 @@ def take_lock(root):
     return handle
 
 
+NIGHTLY_REFRESH_HOUR = 23  # UTC+8, after ECB publishes the day's quote
+
+
+def next_nightly_refresh(now):
+    target = now.replace(hour=NIGHTLY_REFRESH_HOUR, minute=0, second=0, microsecond=0)
+    return target if now < target else target + dt.timedelta(days=1)
+
+
+def run_nightly_refresh(refresh, now, sleep=time.sleep, stop=lambda: False):
+    # Poll the wall clock instead of one long sleep so a refresh missed
+    # while the computer slept runs promptly after it wakes.
+    while not stop():
+        target = next_nightly_refresh(now())
+        while not stop() and now() < target:
+            sleep(min(60, max(1, (target - now()).total_seconds())))
+        if not stop():
+            refresh()
+
+
 def main():
     parser=argparse.ArgumentParser(description='本地双币账本，仅监听本机')
     parser.add_argument('--data-dir', type=Path, default=PROJECT/'private')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--offline', action='store_true', help='不请求汇率（新币折算保持待更新）')
+    parser.add_argument('--exit-when-closed', action='store_true', help='关闭所有账本页面后自动停止服务')
     args=parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error('端口范围为 0–65535')
@@ -75,15 +97,23 @@ def main():
     os.replace(runtime_tmp, root/'runtime.json')
     print(f'本地账本已启动：http://127.0.0.1:{port}', flush=True)
     print('数据仅保存在本地。关闭此窗口或按 Ctrl+C 停止服务。',flush=True)
+    if args.exit_when_closed:
+        from ledger_app.web import IdleExit
+        server.auto_exit=True
+        threading.Thread(target=IdleExit(server).run,daemon=True).start()
+        print('关闭所有账本页面后，服务会自动停止。',flush=True)
     if not args.no_browser:
         threading.Timer(0.5, lambda:webbrowser.open(f'http://127.0.0.1:{port}')).start()
     if not args.offline:
-        def refresh():
+        def refresh(prefix='startup-'):
             try:
-                ledger.dispatch('fx.refresh',{},'startup-'+uuid.uuid4().hex)
+                ledger.dispatch('fx.refresh',{},prefix+uuid.uuid4().hex)
             except Exception:
                 pass  # Startup must work offline; no financial details in logs.
         threading.Thread(target=refresh,daemon=True).start()
+        from ledger_app.fx import LOCAL_TZ
+        threading.Thread(target=run_nightly_refresh,daemon=True,args=(
+            lambda: refresh('nightly-'), lambda: dt.datetime.now(LOCAL_TZ))).start()
     try:
         server.serve_forever(poll_interval=.3)
     except KeyboardInterrupt:
